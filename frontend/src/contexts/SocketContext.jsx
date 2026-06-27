@@ -18,8 +18,11 @@ export const SocketProvider = ({ children }) => {
       return;
     }
 
-    // Connect to local proxy (proxies socket.io requests to 5000)
-    const newSocket = io(window.location.origin, {
+    const socketUrl = import.meta.env.VITE_API_URL 
+      ? import.meta.env.VITE_API_URL.replace(/\/api$/, '') 
+      : window.location.origin;
+
+    const newSocket = io(socketUrl, {
       transports: ['websocket'],
     });
 

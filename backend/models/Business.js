@@ -74,5 +74,13 @@ const businessSchema = new mongoose.Schema({
 // Index for multi-field search performance
 businessSchema.index({ name: 'text', industry: 'text', city: 'text' });
 
+// Pre-save hook to populate googleMapsUrl if missing
+businessSchema.pre('save', function(next) {
+  if (!this.googleMapsUrl) {
+    this.googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(this.name + ' ' + (this.address || '') + ' ' + this.city)}`;
+  }
+  next();
+});
+
 const Business = mongoose.model('Business', businessSchema);
 export default Business;

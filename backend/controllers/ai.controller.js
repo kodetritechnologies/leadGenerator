@@ -257,7 +257,8 @@ export const chatWithAI = async (req, res) => {
             industry: item.industry,
             rating: item.rating ? Number(item.rating) : 0,
             userRatingsTotal: item.userRatingsTotal ? Number(item.userRatingsTotal) : 0,
-            businessSize: item.businessSize || 'medium'
+            businessSize: item.businessSize || 'medium',
+            googleMapsUrl: item.googleMapsUrl || undefined
           });
 
           // 2. Create Lead record linked to the user's team

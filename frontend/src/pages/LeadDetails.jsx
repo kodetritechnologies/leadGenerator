@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { 
-  ArrowLeft, Star, Globe, ShieldCheck, ShieldAlert, Cpu, Sparkles, Send, FileText, CheckSquare, Plus, Clock, MessageSquare, BookOpen, AlertCircle, Mail, MessageCircle, Check
+  ArrowLeft, Star, Globe, ShieldCheck, ShieldAlert, Cpu, Sparkles, Send, FileText, CheckSquare, Plus, Clock, MessageSquare, BookOpen, AlertCircle, Mail, MessageCircle, Check, MapPin, ExternalLink, Trash2
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function LeadDetails() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user, refreshUser } = useAuth();
 
   const [lead, setLead] = useState(null);
@@ -94,6 +95,20 @@ export default function LeadDetails() {
       loadAllData();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleDeleteLead = async () => {
+    if (!window.confirm('Are you sure you want to delete this lead? All associated email logs and analysis records will also be deleted.')) {
+      return;
+    }
+    try {
+      const res = await api.delete(`/leads/${id}`);
+      if (res.success) {
+        navigate('/search');
+      }
+    } catch (err) {
+      alert(err.message || 'Error deleting lead');
     }
   };
 
@@ -357,6 +372,18 @@ export default function LeadDetails() {
             </select>
           </div>
 
+          {/* Delete Button */}
+          <div className="flex flex-col space-y-1">
+            <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider opacity-0">Action</span>
+            <button 
+              onClick={handleDeleteLead}
+              className="px-3 py-1.5 border border-red-500/20 hover:border-red-500 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-all"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Lead</span>
+            </button>
+          </div>
+
         </div>
       </div>
 
@@ -390,6 +417,40 @@ export default function LeadDetails() {
                   <span className="text-muted-foreground">({b.userRatingsTotal} reviews)</span>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Google Maps Embed & Location Visit */}
+          <div className="bg-card border rounded-xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b pb-2">
+              <h3 className="font-semibold text-sm flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-primary" />
+                <span>Exact Location</span>
+              </h3>
+              {b.googleMapsUrl && (
+                <a
+                  href={b.googleMapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg font-bold text-[10px] transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Visit Location</span>
+                </a>
+              )}
+            </div>
+            
+            <div className="border rounded-xl overflow-hidden h-64 bg-muted relative">
+              <iframe
+                title="Google Map Embed"
+                width="100%"
+                height="100%"
+                style={{ border: 0 }}
+                loading="lazy"
+                allowFullScreen
+                referrerPolicy="no-referrer-when-downgrade"
+                src={`https://maps.google.com/maps?q=${encodeURIComponent(b.name + ', ' + (b.address || '') + ', ' + b.city)}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+              />
             </div>
           </div>
 

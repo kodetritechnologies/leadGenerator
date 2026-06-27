@@ -83,3 +83,31 @@
 ::-webkit-scrollbar-thumb {
   @apply bg-muted-foreground/20 rounded-full hover:bg-muted-foreground/45 transition-colors;
 }
+
+/* Custom Selection Styling for Premium Visuals and High Contrast */
+::selection {
+  background-color: hsl(var(--primary) / 0.25);
+  color: inherit;
+}
+
+::-moz-selection {
+  background-color: hsl(var(--primary) / 0.25);
+  color: inherit;
+}
+
+/* Selected text inside primary background elements (e.g., user chat bubbles) */
+.bg-primary ::selection,
+.bg-primary::selection,
+button.bg-primary ::selection,
+button.bg-primary::selection {
+  background-color: rgba(255, 255, 255, 0.3) !important;
+  color: #ffffff !important;
+}
+
+.bg-primary ::-moz-selection,
+.bg-primary::-moz-selection,
+button.bg-primary ::-moz-selection,
+button.bg-primary::-moz-selection {
+  background-color: rgba(255, 255, 255, 0.3) !important;
+  color: #ffffff !important;
+}

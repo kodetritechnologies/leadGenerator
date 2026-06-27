@@ -235,6 +235,7 @@ export const handleAIChatQuery = async (query, chatHistory = [], availableLeads 
       2. If the user is asking to find, search for, or discover leads (e.g., "Find restaurants in Mumbai" or "Search for lawyers in Goa"):
          - Check if any existing leads in the Database Leads Context fit the request, and recommend them.
          - Additionally, generate a list of NEW, high-quality, realistic businesses that match their criteria. These should be businesses that do not exist in the Database Leads Context.
+         - GEOGRAPHICAL ACCURACY CRITICAL: Ensure all generated addresses and landmarks are physically accurate and consistent for the target city. Do NOT place famous landmarks or commercial centers in the wrong neighborhoods or suburbs (e.g., in Indore, 'Shekhar Planet' is located in 'PU-4, Scheme 54' near Prestige College/Bombay Hospital, NOT 'Bicholi Mardana'). Make sure the building/landmark name, street address, and neighborhood/suburb align perfectly.
          - Output a JSON array containing these new businesses at the very bottom of your response in the following exact format:
            NEW_LEADS_JSON: [
              {
@@ -249,7 +250,8 @@ export const handleAIChatQuery = async (query, chatHistory = [], availableLeads 
                "industry": "Industry Name (e.g. Restaurants, Dentists, Hotels)",
                "rating": 4.2 (0 to 5),
                "userRatingsTotal": 120 (number of reviews),
-               "businessSize": "small" | "medium" | "large"
+               "businessSize": "small" | "medium" | "large",
+               "googleMapsUrl": "Google Maps search link, e.g. https://www.google.com/maps/search/?api=1&query=Business+Name+Street+address+City"
              }
            ]
       3. If you want to recommend any existing leads from the Database Leads Context, list their database IDs in the format:
@@ -529,7 +531,8 @@ function runMockChatAssistant(query, availableLeads) {
         industry: industry,
         rating: parseFloat((3.5 + Math.random() * 1.5).toFixed(1)),
         userRatingsTotal: Math.floor(Math.random() * 200) + 15,
-        businessSize: 'medium'
+        businessSize: 'medium',
+        googleMapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(targetNames[0] + ' 101 Commercial St ' + city)}`
       },
       {
         name: targetNames[1],
@@ -543,7 +546,8 @@ function runMockChatAssistant(query, availableLeads) {
         industry: industry,
         rating: parseFloat((3.0 + Math.random() * 1.8).toFixed(1)),
         userRatingsTotal: Math.floor(Math.random() * 90) + 5,
-        businessSize: 'small'
+        businessSize: 'small',
+        googleMapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(targetNames[1] + ' 202 Ring Road ' + city)}`
       }
     ];
 

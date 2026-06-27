@@ -9,7 +9,8 @@ import {
   addLeadManually,
   exportLeads,
   getDashboardStats,
-  getActiveCities
+  getActiveCities,
+  deleteLead
 } from '../controllers/lead.controller.js';
 import { protect } from '../middlewares/auth.middleware.js';
 
@@ -27,5 +28,6 @@ router.put('/:id/status', updateLeadStatus);
 router.put('/:id/bookmark', toggleBookmark);
 router.post('/:id/notes', addNote);
 router.put('/:id/assign', assignLead);
+router.delete('/:id', deleteLead);
 
 export default router;

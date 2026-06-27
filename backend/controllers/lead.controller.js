@@ -286,7 +286,7 @@ export const assignLead = async (req, res) => {
 
 export const addLeadManually = async (req, res) => {
   try {
-    const { name, website, email, phone, address, city, industry, rating } = req.body;
+    const { name, website, email, phone, address, city, industry, rating, googleMapsUrl } = req.body;
 
     if (!name || !city || !industry) {
       return res.status(400).json({ success: false, message: 'Name, City, and Industry are required' });
@@ -302,6 +302,7 @@ export const addLeadManually = async (req, res) => {
       city,
       industry,
       rating: rating ? Number(rating) : 0,
+      googleMapsUrl: googleMapsUrl || undefined,
     });
 
     // Create Lead
@@ -434,6 +435,44 @@ export const getActiveCities = async (req, res) => {
     });
   } catch (error) {
     logger.error(`getActiveCities error: ${error.message}`);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+export const deleteLead = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const teamId = req.user?.teamId;
+
+    if (!teamId) {
+      return res.status(400).json({ success: false, message: 'Team context required' });
+    }
+
+    const lead = await Lead.findById(id);
+    if (!lead) {
+      return res.status(404).json({ success: false, message: 'Lead not found' });
+    }
+
+    // Check ownership
+    if (lead.team.toString() !== teamId.toString()) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    await Lead.findByIdAndDelete(id);
+
+    // Cleanup related documents
+    await LeadAnalysis.deleteMany({ lead: id });
+    await Activity.deleteMany({ lead: id });
+    await Email.deleteMany({ lead: id });
+
+    logger.info(`Lead deleted: ${id} by user ${req.user.id}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Lead deleted successfully'
+    });
+  } catch (error) {
+    logger.error(`deleteLead error: ${error.message}`);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };

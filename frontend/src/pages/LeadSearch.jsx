@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { 
-  Search, SlidersHorizontal, Plus, Download, Star, ExternalLink, Bookmark, BookmarkCheck, ArrowLeftRight, ChevronDown
+  Search, SlidersHorizontal, Plus, Download, Star, ExternalLink, Bookmark, BookmarkCheck, ArrowLeftRight, ChevronDown, Trash2
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -30,7 +30,7 @@ export default function LeadSearch() {
   // Manual Add Modal states
   const [modalOpen, setModalOpen] = useState(false);
   const [newLead, setNewLead] = useState({
-    name: '', website: '', email: '', phone: '', address: '', city: 'Mumbai', industry: 'Restaurants', rating: '4.0'
+    name: '', website: '', email: '', phone: '', address: '', city: 'Mumbai', industry: 'Restaurants', rating: '4.0', googleMapsUrl: ''
   });
   const [modalError, setModalError] = useState('');
 
@@ -99,6 +99,23 @@ export default function LeadSearch() {
     }
   };
 
+  const handleDeleteLead = async (id, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!window.confirm('Are you sure you want to delete this lead? All associated email logs and analysis records will also be deleted.')) {
+      return;
+    }
+    try {
+      const res = await api.delete(`/leads/${id}`);
+      if (res.success) {
+        setLeads(prev => prev.filter(l => l._id !== id));
+        setTotalLeads(prev => Math.max(0, prev - 1));
+      }
+    } catch (err) {
+      alert(err.message || 'Error deleting lead');
+    }
+  };
+
   const handleCreateLead = async (e) => {
     e.preventDefault();
     setModalError('');
@@ -106,7 +123,7 @@ export default function LeadSearch() {
       const res = await api.post('/leads', newLead);
       if (res.success) {
         setModalOpen(false);
-        setNewLead({ name: '', website: '', email: '', phone: '', address: '', city: 'Mumbai', industry: 'Restaurants', rating: '4.0' });
+        setNewLead({ name: '', website: '', email: '', phone: '', address: '', city: 'Mumbai', industry: 'Restaurants', rating: '4.0', googleMapsUrl: '' });
         setPage(1);
         fetchLeads();
       }
@@ -385,13 +402,22 @@ export default function LeadSearch() {
                             {lead.opportunityScore > 0 ? `${lead.opportunityScore}/100` : 'Not Scanned'}
                           </span>
                         </td>
-                        <td className="py-3.5 px-4 text-right align-middle">
-                          <Link 
-                            to={`/search/${lead._id}`}
-                            className="px-2.5 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-primary-foreground font-semibold rounded transition-all inline-flex items-center justify-center whitespace-nowrap"
-                          >
-                            Inspect Lead
-                          </Link>
+                        <td className="py-3.5 px-4 text-right align-middle font-medium">
+                          <div className="flex items-center justify-end space-x-2">
+                            <Link 
+                              to={`/search/${lead._id}`}
+                              className="px-2.5 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-primary-foreground font-semibold rounded transition-all inline-flex items-center justify-center whitespace-nowrap"
+                            >
+                              Inspect Lead
+                            </Link>
+                            <button 
+                              onClick={(e) => handleDeleteLead(lead._id, e)}
+                              className="p-1.5 border border-red-500/10 hover:border-red-500 bg-red-500/5 hover:bg-red-500 text-red-500 hover:text-white rounded transition-all flex items-center justify-center"
+                              title="Delete Lead"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -532,6 +558,16 @@ export default function LeadSearch() {
                   className="w-full px-3 py-2 border rounded-lg bg-background outline-none"
                   value={newLead.address}
                   onChange={e => setNewLead(prev => ({ ...prev, address: e.target.value }))}
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="block text-[10px] font-bold text-muted-foreground uppercase mb-1">Google Maps URL</label>
+                <input 
+                  type="text" placeholder="e.g. https://google.com/maps/... (or leave empty to auto-generate)"
+                  className="w-full px-3 py-2 border rounded-lg bg-background outline-none"
+                  value={newLead.googleMapsUrl}
+                  onChange={e => setNewLead(prev => ({ ...prev, googleMapsUrl: e.target.value }))}
                 />
               </div>
 

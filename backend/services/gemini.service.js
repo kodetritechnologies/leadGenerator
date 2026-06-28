@@ -195,9 +195,46 @@ export const generateProposal = async (business, analysis, pricingDetails = {}) 
 };
 
 /**
+ * AI intent extraction to detect local business search queries
+ */
+export const extractSearchIntent = async (query) => {
+  const ai = getGenAI();
+  if (!ai) return { isSearchRequest: false };
+
+  try {
+    const model = ai.getGenerativeModel({ model: 'gemini-3.5-flash', responseMimeType: 'application/json' });
+    const prompt = `
+      Analyze the following user chat message to determine if the user is asking to search, find, or discover target leads or businesses (e.g. "find salons in Indore", "search for hotels in Mumbai needing a website", "recommend dental clinics in Goa", etc.).
+      
+      Respond in a valid JSON object matching this schema:
+      {
+        "isSearchRequest": boolean,
+        "searchQuery": "string (the business type/industry to search for, e.g. 'Salons', 'Hotels', 'Dental Clinics' or empty if not a search)",
+        "city": "string (the target city name, e.g. 'Indore', 'Mumbai' or empty if not a search)"
+      }
+      
+      User message: "${query}"
+    `;
+
+    const result = await model.generateContent(prompt);
+    let text = result.response.text().trim();
+
+    // Strip markdown code block wrapping if the model outputs it
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
+    }
+
+    return JSON.parse(text);
+  } catch (error) {
+    logger.error(`Error in extractSearchIntent: ${error.message}`);
+    return { isSearchRequest: false };
+  }
+};
+
+/**
  * AI Chat Assistant for Lead Searching
  */
-export const handleAIChatQuery = async (query, chatHistory = [], availableLeads = []) => {
+export const handleAIChatQuery = async (query, chatHistory = [], availableLeads = [], realGoogleLeads = []) => {
   const ai = getGenAI();
   if (!ai) {
     logger.warn('GEMINI_API_KEY missing. Handling AI chat using local filtering heuristics.');
@@ -218,12 +255,30 @@ export const handleAIChatQuery = async (query, chatHistory = [], availableLeads 
 
     const conversationContext = chatHistory.map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`).join('\n');
 
+    const hasRealLeads = realGoogleLeads && realGoogleLeads.length > 0;
+    const realLeadsContext = hasRealLeads
+      ? `Here are the ACTUAL, genuine leads we just fetched from the Google Places API for this query. Recommend these exact leads to the user:
+${JSON.stringify(realGoogleLeads.map(l => ({
+        id: l._id,
+        name: l.name,
+        website: l.website || 'No website',
+        phone: l.phone || 'No phone',
+        address: l.address,
+        city: l.city,
+        rating: l.rating,
+        userRatingsTotal: l.userRatingsTotal,
+        businessSize: l.businessSize
+      })))}`
+      : '';
+
     const prompt = `
       You are LeadBrain AI Finder, a smart sales co-pilot.
       Your goal is to help the user search, filter, and discover leads.
       
       Here are the leads already existing in the user's local database for context:
       ${JSON.stringify(leadsBrief.slice(0, 30))}
+      
+      ${realLeadsContext}
       
       Recent conversation history:
       ${conversationContext}
@@ -233,28 +288,33 @@ export const handleAIChatQuery = async (query, chatHistory = [], availableLeads 
       Instructions:
       1. Answer the user's question clearly.
       2. If the user is asking to find, search for, or discover leads (e.g., "Find restaurants in Mumbai" or "Search for lawyers in Goa"):
-         - Check if any existing leads in the Database Leads Context fit the request, and recommend them.
-         - Additionally, generate a list of NEW, high-quality, realistic businesses that match their criteria. These should be businesses that do not exist in the Database Leads Context.
-         - GEOGRAPHICAL ACCURACY CRITICAL: Ensure all generated addresses and landmarks are physically accurate and consistent for the target city. Do NOT place famous landmarks or commercial centers in the wrong neighborhoods or suburbs (e.g., in Indore, 'Shekhar Planet' is located in 'PU-4, Scheme 54' near Prestige College/Bombay Hospital, NOT 'Bicholi Mardana'). Make sure the building/landmark name, street address, and neighborhood/suburb align perfectly.
-         - Output a JSON array containing these new businesses at the very bottom of your response in the following exact format:
-           NEW_LEADS_JSON: [
-             {
-               "name": "Business Name",
-               "website": "http://example.com" (or empty string/none if website is missing),
-               "email": "contact@example.com",
-               "phone": "+91 99999 99999",
-               "address": "Street address, City",
-               "city": "City Name",
-               "state": "State Name",
-               "country": "India",
-               "industry": "Industry Name (e.g. Restaurants, Dentists, Hotels)",
-               "rating": 4.2 (0 to 5),
-               "userRatingsTotal": 120 (number of reviews),
-               "businessSize": "small" | "medium" | "large",
-               "googleMapsUrl": "Google Maps search link, e.g. https://www.google.com/maps/search/?api=1&query=Business+Name+Street+address+City"
-             }
-           ]
-      3. If you want to recommend any existing leads from the Database Leads Context, list their database IDs in the format:
+         ${hasRealLeads
+        ? `- Highlight, list, and discuss the ACTUAL Google Places leads provided in the context above. Detail their name, ratings, website availability, and phone numbers.
+              - Instruct the user that they can click the recommended lead button below to inspect them.
+              - Do NOT output any "NEW_LEADS_JSON" block because we have already retrieved real results from Google Maps.`
+        : `- Check if any existing leads in the Database Leads Context fit the request, and recommend them.
+              - Additionally, generate a list of NEW, high-quality, realistic businesses that match their criteria. These should be businesses that do not exist in the Database Leads Context.
+              - GEOGRAPHICAL ACCURACY CRITICAL: Ensure all generated addresses and landmarks are physically accurate and consistent for the target city. Do NOT place famous landmarks or commercial centers in the wrong neighborhoods or suburbs.
+              - Output a JSON array containing these new businesses at the very bottom of your response in the following exact format:
+                NEW_LEADS_JSON: [
+                  {
+                    "name": "Business Name",
+                    "website": "http://example.com" (or empty string/none if website is missing),
+                    "email": "contact@example.com",
+                    "phone": "+91 99999 99999",
+                    "address": "Street address, City",
+                    "city": "City Name",
+                    "state": "State Name",
+                    "country": "India",
+                    "industry": "Industry Name (e.g. Restaurants, Dentists, Hotels)",
+                    "rating": 4.2 (0 to 5),
+                    "userRatingsTotal": 120 (number of reviews),
+                    "businessSize": "small" | "medium" | "large",
+                    "googleMapsUrl": "Google Maps search link"
+                  }
+                ]`
+      }
+      3. If you want to recommend any leads (either the real Google Places leads we just fetched, or existing leads from the Database Leads Context), list their database IDs in the format:
          MATCHED_LEAD_IDS: [comma separated database IDs of matched leads, if any]
       
       Respond in clear, professional markdown.
@@ -360,7 +420,7 @@ function mockEmailResponse(type, business, customPoints = '') {
   if (type === 'cold_email') {
     if (hasWebsite) {
       subject = `Quick question regarding website upgrades for ${business.name}`;
-      const reviewText = hasReviews 
+      const reviewText = hasReviews
         ? `Your Google page has outstanding reviews (${business.rating} stars!), but I noticed your website has some loading issues on mobile devices.`
         : `I noticed your business is listed on Google, but your website has some loading issues on mobile devices.`;
 
@@ -379,7 +439,7 @@ Team Kodetri Technologies
 Website: https://www.kodetri.com/`;
     } else {
       subject = `Website setup inquiry for ${business.name}`;
-      const reviewText = hasReviews 
+      const reviewText = hasReviews
         ? `Your Google page has outstanding reviews (${business.rating} stars!), but I noticed that your business doesn't currently have a website.`
         : `I noticed your business is listed on Google, but it doesn't currently have a website or any reviews yet.`;
 

@@ -9,6 +9,7 @@ import Business from '../models/Business.js';
 import User from '../models/User.js';
 import logger from '../utils/logger.js';
 import * as geminiService from '../services/gemini.service.js';
+import * as placesService from '../services/places.service.js';
 import { sendEmail } from '../utils/mailer.js';
 
 // Credit Costs
@@ -231,17 +232,71 @@ export const chatWithAI = async (req, res) => {
     // Fetch all business context to search from
     const availableBusinesses = await Business.find({ city: { $in: ['Mumbai', 'Delhi', 'Jaipur', 'Indore', 'Pune', 'Goa', 'Bangalore'] } });
 
+    // 1. Detect if this is a lead search intent and extract query/city
+    const intent = await geminiService.extractSearchIntent(message);
+    let realGoogleLeads = [];
+
+    if (intent.isSearchRequest && intent.searchQuery && intent.city) {
+      try {
+        // 2. Fetch genuine business data from Google Places API
+        const fetchedLeads = await placesService.fetchRealLeadsFromGoogle(intent.searchQuery, intent.city);
+        
+        if (fetchedLeads && fetchedLeads.length > 0) {
+          for (const item of fetchedLeads) {
+            try {
+              // 3. Save or update Business record (de-duplicating by googlePlaceId)
+              let business = await Business.findOne({ googlePlaceId: item.googlePlaceId });
+              if (!business) {
+                business = await Business.create(item);
+              }
+
+              // 4. Create Lead linked to user's team
+              let lead = await Lead.findOne({ business: business._id, team: user.teamId });
+              if (!lead) {
+                const isMissingWebsite = !business.website || business.website === 'none';
+                lead = await Lead.create({
+                  business: business._id,
+                  team: user.teamId,
+                  status: 'new',
+                  opportunityScore: isMissingWebsite ? 95 : Math.floor(Math.random() * 45) + 40,
+                  tags: isMissingWebsite ? ['Missing Website', 'Cold Pitch'] : ['Has Site', 'SEO Audit Needed']
+                });
+                logger.info(`Google Places dynamically ingested real lead: ${business.name} in ${business.city}`);
+              }
+              
+              // Map the DB lead ID and details into a format for the AI prompt
+              const leadObj = lead.toObject();
+              leadObj.name = business.name;
+              leadObj.website = business.website;
+              leadObj.phone = business.phone;
+              leadObj.address = business.address;
+              leadObj.city = business.city;
+              leadObj.rating = business.rating;
+              leadObj.userRatingsTotal = business.userRatingsTotal;
+              leadObj.businessSize = business.businessSize;
+              
+              realGoogleLeads.push(leadObj);
+            } catch (dbErr) {
+              logger.error(`Error saving real lead from Google Places: ${dbErr.message}`);
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(`Places search failed, falling back to simulated generation: ${err.message}`);
+      }
+    }
+
     let aiResponse;
     try {
-      // Call Gemini
-      aiResponse = await geminiService.handleAIChatQuery(message, history, availableBusinesses);
+      // Call Gemini, passing in the genuine leads fetched from Google Places (if any)
+      aiResponse = await geminiService.handleAIChatQuery(message, history, availableBusinesses, realGoogleLeads);
     } catch (aiErr) {
       await refundCredits(req.user.id, CREDITS_CHAT);
       throw aiErr;
     }
 
-    // Save newly discovered leads into the database
-    if (aiResponse.newLeads && aiResponse.newLeads.length > 0) {
+    // Save newly discovered leads into the database (FALLBACK ONLY for mock leads if no real leads were found)
+    if ((!realGoogleLeads || realGoogleLeads.length === 0) && aiResponse.newLeads && aiResponse.newLeads.length > 0) {
       for (const item of aiResponse.newLeads) {
         try {
           // 1. Create Business record
@@ -276,21 +331,33 @@ export const chatWithAI = async (req, res) => {
             aiResponse.suggestedLeads = [];
           }
           aiResponse.suggestedLeads.push(lead._id.toString());
-          logger.info(`AI Co-pilot dynamically ingested lead: ${business.name} in ${business.city}`);
+          logger.info(`AI Co-pilot dynamically ingested simulated lead: ${business.name} in ${business.city}`);
         } catch (dbErr) {
-          logger.error(`Error saving dynamically discovered lead ${item.name}: ${dbErr.message}`);
+          logger.error(`Error saving simulated lead to DB: ${dbErr.message}`);
         }
       }
     }
 
-    // Save User message
-    await Message.create({
+    // If real leads were fetched, make sure their IDs are recommended in suggestedLeads
+    if (realGoogleLeads && realGoogleLeads.length > 0) {
+      if (!aiResponse.suggestedLeads) {
+        aiResponse.suggestedLeads = [];
+      }
+      realGoogleLeads.forEach(l => {
+        if (!aiResponse.suggestedLeads.includes(l._id.toString())) {
+          aiResponse.suggestedLeads.push(l._id.toString());
+        }
+      });
+    }
+
+    // Save user's question
+    const userMessage = await Message.create({
       chat: chat._id,
       role: 'user',
       content: message
     });
 
-    // Save Assistant message
+    // Save assistant's answer
     const assistantMessage = await Message.create({
       chat: chat._id,
       role: 'assistant',
@@ -298,11 +365,15 @@ export const chatWithAI = async (req, res) => {
       suggestedLeads: aiResponse.suggestedLeads
     });
 
+    // Update Chat modified timestamp
+    chat.updatedAt = new Date();
+    await chat.save();
+
     res.status(200).json({
       success: true,
       data: {
         chatId: chat._id,
-        userMessage: message,
+        userMessage,
         assistantMessage,
         creditsRemaining: user.aiCredits
       }

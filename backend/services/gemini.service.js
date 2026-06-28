@@ -22,6 +22,30 @@ const getGenAI = () => {
 // Helper to check if API is active
 const isAIActive = () => !!process.env.GEMINI_API_KEY;
 
+// Retry helper for API calls to handle transient 503/429/high-demand errors
+const generateContentWithRetry = async (model, prompt, retries = 3, delayMs = 1000) => {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const result = await model.generateContent(prompt);
+      return result;
+    } catch (error) {
+      const errorMsg = error.message || '';
+      const isTransient = errorMsg.includes('503') || 
+                          errorMsg.includes('Service Unavailable') || 
+                          errorMsg.includes('high demand') || 
+                          errorMsg.includes('ResourceExhausted') || 
+                          errorMsg.includes('429');
+      if (isTransient && attempt < retries) {
+        logger.warn(`Gemini API transient error (attempt ${attempt}/${retries}): ${errorMsg}. Retrying in ${delayMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        delayMs *= 2; // exponential backoff
+        continue;
+      }
+      throw error;
+    }
+  }
+};
+
 /**
  * AI Website Audit & Analysis
  */
@@ -63,7 +87,7 @@ export const analyzeWebsiteOpportunity = async (websiteUrl, business) => {
       Be realistic and tailor it to the input details. For instance, if rating is high but site is missing or poor, opportunity is high.
     `;
 
-    const result = await model.generateContent(prompt);
+    const result = await generateContentWithRetry(model, prompt);
     const text = result.response.text();
     return JSON.parse(text);
   } catch (error) {
@@ -123,7 +147,7 @@ export const generateOutreachEmail = async (emailType, business, customPoints = 
       - If the target business HAS a website, pitch a redesign, mobile responsiveness improvement, or speed/SEO audit.
     `;
 
-    const result = await model.generateContent(prompt);
+    const result = await generateContentWithRetry(model, prompt);
     const text = result.response.text();
 
     const subjectMatch = text.match(/Subject:\s*(.*)/i);
@@ -185,7 +209,7 @@ export const generateProposal = async (business, analysis, pricingDetails = {}) 
       }
     `;
 
-    const result = await model.generateContent(prompt);
+    const result = await generateContentWithRetry(model, prompt);
     const text = result.response.text();
     return JSON.parse(text);
   } catch (error) {
@@ -216,7 +240,7 @@ export const extractSearchIntent = async (query) => {
       User message: "${query}"
     `;
 
-    const result = await model.generateContent(prompt);
+    const result = await generateContentWithRetry(model, prompt);
     let text = result.response.text().trim();
 
     // Strip markdown code block wrapping if the model outputs it
@@ -234,7 +258,7 @@ export const extractSearchIntent = async (query) => {
 /**
  * AI Chat Assistant for Lead Searching
  */
-export const handleAIChatQuery = async (query, chatHistory = [], availableLeads = [], realGoogleLeads = []) => {
+export const handleAIChatQuery = async (query, chatHistory = [], availableLeads = [], realGoogleLeads = [], googleSearchAttempted = false, googleSearchError = null) => {
   const ai = getGenAI();
   if (!ai) {
     logger.warn('GEMINI_API_KEY missing. Handling AI chat using local filtering heuristics.');
@@ -256,8 +280,11 @@ export const handleAIChatQuery = async (query, chatHistory = [], availableLeads 
     const conversationContext = chatHistory.map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`).join('\n');
 
     const hasRealLeads = realGoogleLeads && realGoogleLeads.length > 0;
-    const realLeadsContext = hasRealLeads
-      ? `Here are the ACTUAL, genuine leads we just fetched from the Google Places API for this query. Recommend these exact leads to the user:
+    const searchFailed = googleSearchAttempted && !hasRealLeads;
+
+    let realLeadsContext = '';
+    if (hasRealLeads) {
+      realLeadsContext = `Here are the ACTUAL, genuine leads we just fetched from the Google Places API for this query. Recommend these exact leads to the user:
 ${JSON.stringify(realGoogleLeads.map(l => ({
         id: l._id,
         name: l.name,
@@ -268,8 +295,12 @@ ${JSON.stringify(realGoogleLeads.map(l => ({
         rating: l.rating,
         userRatingsTotal: l.userRatingsTotal,
         businessSize: l.businessSize
-      })))}`
-      : '';
+      })))}`;
+    } else if (searchFailed) {
+      realLeadsContext = `The system attempted to fetch real-time leads from the Google Places API, but the request failed or returned no real results.
+Reason/Error context: "${googleSearchError || 'No matching businesses found in Google Places'}"
+CRITICAL: You must NOT generate any fake, mock, simulated, or dummy leads. Do NOT output a NEW_LEADS_JSON block. Instead, explicitly inform the user that live searching is currently unavailable or returned no results due to the API issue or lack of local matches. Prompt the user to check their Google Places API configuration or try a different city/search term.`;
+    }
 
     const prompt = `
       You are LeadBrain AI Finder, a smart sales co-pilot.
@@ -292,6 +323,12 @@ ${JSON.stringify(realGoogleLeads.map(l => ({
         ? `- Highlight, list, and discuss the ACTUAL Google Places leads provided in the context above. Detail their name, ratings, website availability, and phone numbers.
               - Instruct the user that they can click the recommended lead button below to inspect them.
               - Do NOT output any "NEW_LEADS_JSON" block because we have already retrieved real results from Google Maps.`
+        : searchFailed
+        ? `- Explicitly state that the Google Places API search failed to retrieve live results or that no genuine businesses were found for this query in the specified city.
+              - Explain the failure or context clearly (e.g., missing API key, API endpoint error, or zero results).
+              - Instruct the user on how they can fix it (e.g., check GOOGLE_MAP_API_KEY environment variable, ensure Places API is enabled and unrestricted in Google Cloud Console, or try a different query/location).
+              - Do NOT generate any fake, mock, simulated, or dummy leads.
+              - Do NOT output a "NEW_LEADS_JSON" block under any circumstances.`
         : `- Check if any existing leads in the Database Leads Context fit the request, and recommend them.
               - Additionally, generate a list of NEW, high-quality, realistic businesses that match their criteria. These should be businesses that do not exist in the Database Leads Context.
               - GEOGRAPHICAL ACCURACY CRITICAL: Ensure all generated addresses and landmarks are physically accurate and consistent for the target city. Do NOT place famous landmarks or commercial centers in the wrong neighborhoods or suburbs.
@@ -313,14 +350,14 @@ ${JSON.stringify(realGoogleLeads.map(l => ({
                     "googleMapsUrl": "Google Maps search link"
                   }
                 ]`
-      }
+         }
       3. If you want to recommend any leads (either the real Google Places leads we just fetched, or existing leads from the Database Leads Context), list their database IDs in the format:
          MATCHED_LEAD_IDS: [comma separated database IDs of matched leads, if any]
       
       Respond in clear, professional markdown.
     `;
 
-    const result = await model.generateContent(prompt);
+    const result = await generateContentWithRetry(model, prompt);
     const responseText = result.response.text();
 
     const idsMatch = responseText.match(/MATCHED_LEAD_IDS:\s*\[(.*?)\]/);
@@ -559,93 +596,25 @@ function runMockChatAssistant(query, availableLeads) {
   else if (text.includes('real estate') || text.includes('builder') || text.includes('realty')) industry = 'Real Estate';
   else if (text.includes('barber') || text.includes('salon') || text.includes('haircut') || text.includes('parlour')) industry = 'Barber Shops';
 
-  let matchedLeads = [];
-  let newLeads = [];
-
-  // If user is searching/finding new leads
-  const isSearchQuery = text.includes('find') || text.includes('search') || text.includes('show') || text.includes('get') || text.includes('look for');
-
-  if (isSearchQuery) {
-    // Generate 2 new mock leads to simulate finding new ones!
-    const names = {
-      'Restaurants': [`The Gourmet Garden ${city}`, `Spice Route Bistro ${city}`],
-      'Dentists': [`Smile Dental Clinic ${city}`, `Apex Orthodontics ${city}`],
-      'Hotels': [`Royal Heritage Inn ${city}`, `Grand View Retreat ${city}`],
-      'Real Estate': [`Prime Properties ${city}`, `Apex Realtors ${city}`],
-      'Gyms': [`Iron Temple Gym ${city}`, `Pulse Fitness Club ${city}`],
-      'Barber Shops': [`Classic Cuts Barber ${city}`, `Style Loft Salon ${city}`]
-    };
-
-    const targetNames = names[industry] || [`Elite Business Services ${city}`, `Global Digital Agency ${city}`];
-
-    newLeads = [
-      {
-        name: targetNames[0],
-        website: Math.random() > 0.5 ? `http://${targetNames[0].toLowerCase().replace(/\s+/g, '')}.com` : '',
-        email: `info@${targetNames[0].toLowerCase().replace(/\s+/g, '')}.com`,
-        phone: `+91 ${Math.floor(8000000000 + Math.random() * 1999999999)}`,
-        address: `101 Commercial St, ${city}`,
-        city: city,
-        state: city === 'Delhi' ? 'Delhi' : city === 'Mumbai' || city === 'Pune' ? 'Maharashtra' : city === 'Jaipur' ? 'Rajasthan' : 'Goa',
-        country: 'India',
-        industry: industry,
-        rating: parseFloat((3.5 + Math.random() * 1.5).toFixed(1)),
-        userRatingsTotal: Math.floor(Math.random() * 200) + 15,
-        businessSize: 'medium',
-        googleMapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(targetNames[0] + ' 101 Commercial St ' + city)}`
-      },
-      {
-        name: targetNames[1],
-        website: '', // mock missing website for high opportunity
-        email: `contact@${targetNames[1].toLowerCase().replace(/\s+/g, '')}.com`,
-        phone: `+91 ${Math.floor(8000000000 + Math.random() * 1999999999)}`,
-        address: `202 Ring Road, ${city}`,
-        city: city,
-        state: city === 'Delhi' ? 'Delhi' : city === 'Mumbai' || city === 'Pune' ? 'Maharashtra' : city === 'Jaipur' ? 'Rajasthan' : 'Goa',
-        country: 'India',
-        industry: industry,
-        rating: parseFloat((3.0 + Math.random() * 1.8).toFixed(1)),
-        userRatingsTotal: Math.floor(Math.random() * 90) + 5,
-        businessSize: 'small',
-        googleMapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(targetNames[1] + ' 202 Ring Road ' + city)}`
-      }
-    ];
-
-    matchedLeads = availableLeads.filter(l => l.city.toLowerCase() === city.toLowerCase() && l.industry.toLowerCase() === industry.toLowerCase());
-  } else {
-    // Standard heuristics fallback
-    if (text.includes('restaurant') || text.includes('food')) {
-      matchedLeads = availableLeads.filter(l => l.industry.toLowerCase().includes('restaurant') || l.industry.toLowerCase().includes('cafe'));
-    } else if (text.includes('dentist') || text.includes('dental') || text.includes('doctor')) {
-      matchedLeads = availableLeads.filter(l => l.industry.toLowerCase().includes('dentist') || l.industry.toLowerCase().includes('clinic'));
-    } else if (text.includes('hotel') || text.includes('stay') || text.includes('resort')) {
-      matchedLeads = availableLeads.filter(l => l.industry.toLowerCase().includes('hotel') || l.industry.toLowerCase().includes('resort'));
-    } else if (text.includes('barber') || text.includes('salon') || text.includes('haircut') || text.includes('parlour')) {
-      matchedLeads = availableLeads.filter(l => l.industry.toLowerCase().includes('barber') || l.industry.toLowerCase().includes('salon'));
-    } else if (text.includes('no website') || text.includes('without website') || text.includes('missing')) {
-      matchedLeads = availableLeads.filter(l => !l.website);
-    } else {
-      matchedLeads = availableLeads.slice(0, 3);
-    }
-  }
+  // Filter existing leads in the database by city and industry if specified
+  const matchedLeads = availableLeads.filter(l => 
+    l.city.toLowerCase() === city.toLowerCase() && 
+    (l.industry.toLowerCase().includes(industry.toLowerCase().slice(0, -1)) || l.industry.toLowerCase().includes(industry.toLowerCase()))
+  );
 
   const ids = matchedLeads.map(l => l._id.toString());
 
-  let listMarkdown = '';
-  if (isSearchQuery) {
-    listMarkdown = `I searched online for new listings in **${city}** and found **${newLeads.length} new leads** for **${industry}**. I've automatically added them to your database:\n\n` +
-      newLeads.map(l => `- **${l.name}** (${l.rating}⭐) | Website: ${l.website || '*None (High Opportunity!)*'}`).join('\n');
-  } else {
-    listMarkdown = matchedLeads.length > 0
-      ? `I searched the system database and found **${matchedLeads.length} leads** matching your request:\n\n` +
+  const listMarkdown = matchedLeads.length > 0
+    ? `I searched the system database and found **${matchedLeads.length} leads** matching your request:\n\n` +
       matchedLeads.map(l => `- **${l.name}** in ${l.city} (${l.industry}) - Website: ${l.website || 'None'}`).join('\n')
-      : `I searched the database but couldn't find any direct matches. Try searching other cities or industries using the sidebar filters!`;
-  }
+    : `I searched the database but couldn't find any direct matches for ${industry} in ${city}.`;
+
+  const warningMsg = "⚠️ Note: The Gemini AI Service is currently experiencing high demand or is temporarily offline. We could only search existing database leads.";
 
   return {
-    content: `### LeadBrain AI Assistant Response\n\n${listMarkdown}\n\nI can help you build custom cold outreach emails, or generate a development proposal for any of these leads. Let me know what you want to do next!`,
+    content: `### LeadBrain AI Assistant Response\n\n${warningMsg}\n\n${listMarkdown}\n\nI can help you build custom cold outreach emails, or generate a development proposal for any of these leads. Let me know what you want to do next!`,
     suggestedLeads: ids,
-    newLeads: newLeads
+    newLeads: []
   };
 }
 
@@ -720,7 +689,7 @@ export const generateWhatsAppPitch = async (type, business, customPoints = '') =
       - If the target business has 0 Google reviews, do NOT mention their Google rating or outstanding reviews in the message.
     `;
 
-    const result = await model.generateContent(prompt);
+    const result = await generateContentWithRetry(model, prompt);
     const text = result.response.text().trim();
     return { message: text };
   } catch (error) {

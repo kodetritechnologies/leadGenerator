@@ -235,8 +235,11 @@ export const chatWithAI = async (req, res) => {
     // 1. Detect if this is a lead search intent and extract query/city
     const intent = await geminiService.extractSearchIntent(message);
     let realGoogleLeads = [];
+    let googleSearchAttempted = false;
+    let googleSearchError = null;
 
     if (intent.isSearchRequest && intent.searchQuery && intent.city) {
+      googleSearchAttempted = true;
       try {
         // 2. Fetch genuine business data from Google Places API
         const fetchedLeads = await placesService.fetchRealLeadsFromGoogle(intent.searchQuery, intent.city);
@@ -280,23 +283,30 @@ export const chatWithAI = async (req, res) => {
               logger.error(`Error saving real lead from Google Places: ${dbErr.message}`);
             }
           }
+        } else {
+          if (!process.env.GOOGLE_MAP_API_KEY) {
+            googleSearchError = 'Google Maps API Key is missing in backend environment configuration.';
+          } else {
+            googleSearchError = 'Google Places API returned no results for the search query and city.';
+          }
         }
       } catch (err) {
-        logger.error(`Places search failed, falling back to simulated generation: ${err.message}`);
+        logger.error(`Places search failed: ${err.message}`);
+        googleSearchError = err.message;
       }
     }
 
     let aiResponse;
     try {
       // Call Gemini, passing in the genuine leads fetched from Google Places (if any)
-      aiResponse = await geminiService.handleAIChatQuery(message, history, availableBusinesses, realGoogleLeads);
+      aiResponse = await geminiService.handleAIChatQuery(message, history, availableBusinesses, realGoogleLeads, googleSearchAttempted, googleSearchError);
     } catch (aiErr) {
       await refundCredits(req.user.id, CREDITS_CHAT);
       throw aiErr;
     }
 
-    // Save newly discovered leads into the database (FALLBACK ONLY for mock leads if no real leads were found)
-    if ((!realGoogleLeads || realGoogleLeads.length === 0) && aiResponse.newLeads && aiResponse.newLeads.length > 0) {
+    // Save newly discovered leads into the database (FALLBACK ONLY for mock leads if no real leads were found AND no search attempt failed)
+    if (!googleSearchAttempted && (!realGoogleLeads || realGoogleLeads.length === 0) && aiResponse.newLeads && aiResponse.newLeads.length > 0) {
       for (const item of aiResponse.newLeads) {
         try {
           // 1. Create Business record

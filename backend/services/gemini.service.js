@@ -628,7 +628,7 @@ export function formatEmailHtml(subject, body) {
 <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.05);">
   <!-- Header -->
   <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-bottom: 1px solid #e2e8f0;">
-    <img src="http://localhost:5000/public/logo.png" alt="Kodetri Technologies" style="height: 50px; width: auto; object-fit: contain; display: block; margin: 0 auto;" />
+    <img src="${process.env.BACKEND_URL || 'http://localhost:5000'}/public/logo.png" alt="Kodetri Technologies" style="height: 50px; width: auto; object-fit: contain; display: block; margin: 0 auto;" />
   </div>
   <!-- Body -->
   <div style="padding: 32px; color: #334155; line-height: 1.6; font-size: 14px;">

@@ -37,7 +37,11 @@ export const protect = async (req, res, next) => {
     logger.error(`Authentication error: ${error.message}`);
     
     // Clear stale cookie automatically
-    res.clearCookie('token');
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    });
     
     return res.status(401).json({
       success: false,

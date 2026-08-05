@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Send, Bot, User, ArrowRight, CornerDownLeft } from 'lucide-react';
+import { Sparkles, Send, Bot, User, ArrowRight, CornerDownLeft, MessageSquare, History, Plus, X } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
@@ -11,6 +11,7 @@ export default function AIChat() {
   const [loading, setLoading] = useState(false);
   const [chatId, setChatId] = useState(null);
   const [historyThreads, setHistoryThreads] = useState([]);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const messagesEndRef = useRef(null);
 
@@ -26,6 +27,7 @@ export default function AIChat() {
   const selectThread = async (id) => {
     setLoading(true);
     setChatId(id);
+    setMobileSidebarOpen(false);
     try {
       const res = await api.get(`/ai/chats/${id}/messages`);
       if (res.success) setMessages(res.data.messages);
@@ -34,6 +36,12 @@ export default function AIChat() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleNewChat = () => {
+    setChatId(null);
+    setMessages([]);
+    setMobileSidebarOpen(false);
   };
 
   useEffect(() => {
@@ -77,42 +85,152 @@ export default function AIChat() {
     "Recommend Pune gyms likely to buy eCommerce scheduling."
   ];
 
-  return (
-    <div className="h-[calc(100vh-10rem)] flex border rounded-xl overflow-hidden bg-card shadow-sm text-xs">
+  const activeThread = historyThreads.find((t) => t._id === chatId);
 
-      {/* Sidebar Thread List */}
-      <aside className="w-64 border-r bg-muted/20 flex flex-col justify-between hidden md:flex">
-        <div className="p-4 border-b flex items-center justify-between">
-          <span className="font-semibold text-sm">Chat Sessions</span>
+  return (
+    <div className="h-[calc(100vh-10rem)] flex border rounded-xl overflow-hidden bg-card shadow-sm text-xs relative">
+
+      {/* Mobile Drawer Overlay */}
+      {mobileSidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-xs md:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
+      {/* Mobile Drawer Sidebar */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-72 bg-card border-r shadow-xl flex flex-col transform transition-transform duration-200 ease-in-out md:hidden ${
+          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="p-4 border-b flex items-center justify-between bg-muted/30">
+          <div className="flex items-center space-x-2">
+            <History className="w-4 h-4 text-primary" />
+            <span className="font-semibold text-sm">Chat Sessions</span>
+            {historyThreads.length > 0 && (
+              <span className="text-[10px] bg-primary/15 text-primary font-bold px-1.5 py-0.5 rounded-full">
+                {historyThreads.length}
+              </span>
+            )}
+          </div>
           <button
-            onClick={() => { setChatId(null); setMessages([]); }}
-            className="text-[10px] text-primary font-bold hover:underline"
+            onClick={() => setMobileSidebarOpen(false)}
+            className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
           >
-            New Chat
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-3 border-b">
+          <button
+            onClick={handleNewChat}
+            className="w-full flex items-center justify-center space-x-2 px-3 py-2 bg-primary text-primary-foreground font-semibold rounded-lg hover:bg-primary/90 transition-colors shadow-xs"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>New Chat</span>
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {historyThreads.map((thread) => (
-            <button
-              key={thread._id}
-              onClick={() => selectThread(thread._id)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg truncate font-medium transition-all ${chatId === thread._id ? 'bg-primary/10 text-primary' : 'hover:bg-muted text-muted-foreground'}`}
-            >
-              {thread.title}
-            </button>
-          ))}
+          {historyThreads.length === 0 ? (
+            <div className="p-4 text-center text-muted-foreground text-xs">
+              No chat history yet. Start a new conversation!
+            </div>
+          ) : (
+            historyThreads.map((thread) => (
+              <button
+                key={thread._id}
+                onClick={() => selectThread(thread._id)}
+                className={`w-full text-left px-3 py-2.5 rounded-lg truncate font-medium transition-all flex items-center space-x-2 ${
+                  chatId === thread._id
+                    ? 'bg-primary/10 text-primary font-semibold'
+                    : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="truncate flex-1">{thread.title || 'Untitled Chat'}</span>
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
+
+      {/* Desktop Sidebar Thread List */}
+      <aside className="w-64 border-r bg-muted/20 flex-col justify-between hidden md:flex shrink-0">
+        <div className="p-4 border-b flex items-center justify-between">
+          <div className="flex items-center space-x-1.5">
+            <span className="font-semibold text-sm">Chat Sessions</span>
+            {historyThreads.length > 0 && (
+              <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground font-semibold">
+                {historyThreads.length}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={handleNewChat}
+            className="flex items-center space-x-1 text-[11px] text-primary font-bold hover:underline"
+          >
+            <Plus className="w-3 h-3" />
+            <span>New</span>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {historyThreads.length === 0 ? (
+            <div className="p-4 text-center text-muted-foreground text-[11px]">
+              No saved chat sessions.
+            </div>
+          ) : (
+            historyThreads.map((thread) => (
+              <button
+                key={thread._id}
+                onClick={() => selectThread(thread._id)}
+                className={`w-full text-left px-3 py-2.5 rounded-lg truncate font-medium transition-all flex items-center space-x-2 ${
+                  chatId === thread._id
+                    ? 'bg-primary/10 text-primary font-semibold'
+                    : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="truncate flex-1">{thread.title || 'Untitled Chat'}</span>
+              </button>
+            ))
+          )}
         </div>
       </aside>
 
       {/* Primary Message Area */}
-      <div className="flex-1 flex flex-col justify-between bg-card relative">
+      <div className="flex-1 flex flex-col justify-between bg-card relative min-w-0">
+
+        {/* Mobile Header Bar */}
+        <div className="p-3 border-b bg-muted/30 flex items-center justify-between md:hidden">
+          <button
+            onClick={() => setMobileSidebarOpen(true)}
+            className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-background border hover:bg-muted text-foreground text-xs font-medium transition-colors"
+          >
+            <History className="w-3.5 h-3.5 text-primary" />
+            <span>Sessions {historyThreads.length > 0 && `(${historyThreads.length})`}</span>
+          </button>
+
+          <div className="text-xs font-semibold truncate max-w-[140px] text-center text-muted-foreground">
+            {activeThread?.title || (chatId ? 'Active Chat' : 'New Chat')}
+          </div>
+
+          <button
+            onClick={handleNewChat}
+            className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>New</span>
+          </button>
+        </div>
 
         {/* Messages Feed */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
 
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center max-w-lg mx-auto space-y-6">
+            <div className="flex flex-col items-center justify-center h-full text-center max-w-lg mx-auto space-y-6 py-6">
               <div className="w-12 h-12 rounded-xl bg-primary/15 flex items-center justify-center text-primary">
                 <Sparkles className="w-6 h-6" />
               </div>
@@ -124,12 +242,12 @@ export default function AIChat() {
               </div>
 
               {/* Quick Prompt Cards */}
-              <div className="grid grid-cols-2 gap-3 w-full text-left">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3 w-full text-left">
                 {quickPrompts.map((p, idx) => (
                   <button
                     key={idx}
                     onClick={() => setQuery(p)}
-                    className="p-3 border rounded-xl bg-muted/40 hover:bg-muted hover:border-primary/20 transition-all font-medium text-muted-foreground hover:text-foreground leading-snug"
+                    className="p-3 border rounded-xl bg-muted/40 hover:bg-muted hover:border-primary/20 transition-all font-medium text-muted-foreground hover:text-foreground leading-snug text-xs"
                   >
                     {p}
                   </button>
@@ -140,15 +258,15 @@ export default function AIChat() {
             messages.map((m, i) => {
               const isAssistant = m.role === 'assistant';
               return (
-                <div key={i} className={`flex space-x-3.5 items-start ${isAssistant ? 'justify-start' : 'justify-end text-right'}`}>
+                <div key={i} className={`flex space-x-2.5 sm:space-x-3.5 items-start ${isAssistant ? 'justify-start' : 'justify-end text-right'}`}>
                   {isAssistant && (
-                    <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border flex items-center justify-center text-indigo-500 flex-shrink-0">
-                      <Bot className="w-4 h-4" />
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-indigo-500/10 border flex items-center justify-center text-indigo-500 flex-shrink-0">
+                      <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
                   )}
-                  <div className="space-y-3 max-w-[85%] text-left">
-                    <div className={`p-4 rounded-2xl shadow-sm text-xs leading-relaxed ${isAssistant ? 'bg-muted/50 text-foreground border' : 'bg-primary text-primary-foreground'}`}>
-                      <pre className="whitespace-pre-wrap font-sans">{m.content}</pre>
+                  <div className="space-y-3 max-w-[88%] sm:max-w-[85%] text-left">
+                    <div className={`p-3.5 sm:p-4 rounded-2xl shadow-sm text-xs leading-relaxed ${isAssistant ? 'bg-muted/50 text-foreground border' : 'bg-primary text-primary-foreground'}`}>
+                      <pre className="whitespace-pre-wrap font-sans break-words">{m.content}</pre>
                     </div>
 
                     {/* Inline Matched Leads Shortcut buttons */}
@@ -171,7 +289,7 @@ export default function AIChat() {
                     )}
                   </div>
                   {!isAssistant && (
-                    <div className="w-8 h-8 rounded-full bg-primary/25 flex items-center justify-center font-bold text-primary flex-shrink-0 uppercase">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/25 flex items-center justify-center font-bold text-primary flex-shrink-0 uppercase text-[11px] sm:text-xs">
                       {user?.name?.substring(0, 2)}
                     </div>
                   )}
@@ -193,22 +311,22 @@ export default function AIChat() {
         </div>
 
         {/* Input box */}
-        <div className="p-4 border-t bg-card/60 backdrop-blur-md sticky bottom-0">
+        <div className="p-3 sm:p-4 border-t bg-card/60 backdrop-blur-md sticky bottom-0">
           <form onSubmit={handleSubmit} className="relative flex items-center border rounded-xl overflow-hidden bg-background focus-within:ring-1 focus-within:ring-primary focus-within:border-primary transition-all">
             <input
               type="text"
               placeholder="Ask lead finder co-pilot..."
               disabled={loading}
-              className="w-full pl-4 pr-12 py-3 bg-transparent border-none outline-none text-xs"
+              className="w-full pl-3 sm:pl-4 pr-10 sm:pr-12 py-2.5 sm:py-3 bg-transparent border-none outline-none text-xs"
               value={query}
               onChange={e => setQuery(e.target.value)}
             />
             <button
               type="submit"
               disabled={loading || !query.trim()}
-              className="absolute right-2 p-1.5 bg-primary disabled:opacity-40 text-primary-foreground rounded-lg transition-colors flex items-center"
+              className="absolute right-1.5 sm:right-2 p-1.5 bg-primary disabled:opacity-40 text-primary-foreground rounded-lg transition-colors flex items-center"
             >
-              <Send className="w-4.5 h-4.5" />
+              <Send className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
             </button>
           </form>
           <div className="flex justify-between text-[9px] text-muted-foreground mt-2 px-1">
@@ -221,3 +339,4 @@ export default function AIChat() {
     </div>
   );
 }
+

@@ -4,8 +4,6 @@ jspm_packages/
 web_modules/
 
 # Local configuration files
-.env
-.env.local
 .env.development.local
 .env.test.local
 .env.production.local
@@ -38,7 +36,6 @@ ehthumbs.db
 Thumbs.db
 
 # Editor configurations and IDEs
-.vscode/
 .idea/
 *.suo
 *.ntvs*
@@ -58,3 +55,7 @@ coverage/
 scratch/
 scratch_test.js
 test-gemini.js
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+config.bat
